@@ -1,0 +1,238 @@
+# django-friendship
+
+[![CI](https://github.com/revsys/django-friendship/actions/workflows/actions.yml/badge.svg)](https://github.com/revsys/django-friendship/actions/workflows/actions.yml)
+[![PyPI](https://img.shields.io/pypi/v/django-friendship.svg)](https://pypi.org/project/django-friendship/)
+[![Python versions](https://img.shields.io/pypi/pyversions/django-friendship.svg)](https://pypi.org/project/django-friendship/)
+[![Django versions](https://img.shields.io/pypi/frameworkversions/django/django-friendship.svg)](https://pypi.org/project/django-friendship/)
+
+This application enables you to create and manage follows, blocks and bi-directional friendships between users. It features:
+
+- Friendship request objects that can be accepted, rejected, canceled, or marked as viewed.
+- Hooks to easily list all friend requests sent or received by a given user, filtered by the status of the request.
+- A blocklist for each user of users they've blocked.
+- Tags to include information about friendships, blocks and follows in your templates.
+- Integration with `AUTH_USER_MODEL`.
+- Validation to prevent common mistakes.
+- Faster server response time through caching
+
+## Requirements
+
+Django 5.2, 6.0, and 6.1 + Python 3.11, 3.12, 3.13, 3.14, and 3.15 (including free-threaded 3.14t and 3.15t) since **v1.12.0**.
+
+Previously:
+
+- Django 4.2, 5.0, 5.1, 5.2, 6.0, and 6.1 + Python 3.10–3.14 since **v1.10.0** (3.15 tested as a pre-release from v1.11.1)
+- Django 4.2, 5.1, 5.2 + Python 3.9–3.13 since **v1.9.6**
+
+## Installation
+
+1. `pip install django-friendship`
+2. add `"friendship"` to `INSTALLED_APPS` and run `python manage.py migrate`.
+3. Use the friendship manager in your own views, or wire up the URLconf to include the builtin views:
+
+```python
+urlpatterns = [
+    # other paths
+    path("friendship/", include("friendship.urls"))
+]
+```
+
+## Usage
+
+`django-friendship` provides a free API that gives you several ways to create and manage friendship requests or follows in your views. Add the following at the top of your `views.py`:
+
+```python
+from django.contrib.auth.models import User
+from friendship.models import Friend, Follow, Block
+```
+
+### Getting Data about Friendships
+
+- List all of a user's friends: `Friend.objects.friends(user=request.user)`
+- Count of a user's friends: `Friend.objects.friend_count(user=request.user)`
+- List all unread friendship requests: `Friend.objects.unread_requests(user=request.user)`
+- List all unrejected friendship requests: `Friend.objects.unrejected_requests(user=request.user)`
+- Count of all unrejected friendship requests: `Friend.objects.unrejected_request_count(user=request.user)`
+- List all rejected friendship requests: `Friend.objects.rejected_requests(user=request.user)`
+- List of all sent friendship requests: `Friend.objects.sent_requests(user=request.user)`
+- Test if two users are friends: `Friend.objects.are_friends(user1=request.user, user2=other_user) == True`
+- Test if a friendship request already exists between two users (either direction): `Friend.objects.request_exists(from_user=request.user, to_user=other_user) == True`
+
+### Getting Data about Follows
+
+- List of a user's followers: `Follow.objects.followers(user=request.user)`
+- List of who a user is following: `Follow.objects.following(user=request.user)`
+
+### Getting Data about Blocks
+
+- List of a user's blockers: `Block.objects.blocked(user=request.user)`
+- List of who a user is blocking: `Block.objects.blocking(user=request.user)`
+- Test if a user is blocked: `Block.objects.is_blocked(user1=request.user, user2=other_user) == True`
+
+### Managing Friendships and Follows
+
+See the [cookbook](https://django-friendship.readthedocs.io/en/latest/cookbook/) for more task-oriented recipes.
+
+#### Create a friendship request:
+
+```python
+other_user = User.objects.get(pk=1)
+Friend.objects.add_friend(
+    from_user=request.user,  # The sender
+    to_user=other_user,  # The recipient
+    message="Hi! I would like to add you",  # optional
+)
+```
+
+#### Let the user who received the request respond:
+
+```python
+from friendship.models import FriendshipRequest
+
+friend_request = FriendshipRequest.objects.get(
+    from_user=request.user, to_user=other_user
+)
+friend_request.accept()
+# or friend_request.reject()
+```
+
+A rejected request does not block future requests — the sender may request
+again later. To cap how many friends a user can have, see
+[`FRIENDSHIP_MAX_FRIENDS`](#settings) under Settings.
+
+#### To remove the friendship relationship between `request.user` and `other_user`, do the following:
+
+```python
+Friend.objects.remove_friend(from_user=request.user, to_user=other_user)
+```
+
+#### Make request.user a follower of other_user:
+
+```python
+Follow.objects.add_follower(follower=request.user, followee=other_user)
+```
+
+
+#### Make request.user block other_user:
+
+```python
+Block.objects.add_block(blocker=request.user, blocked=other_user)
+```
+
+#### Make request.user unblock other_user:
+
+```python
+Block.objects.remove_block(blocker=request.user, blocked=other_user)
+```
+
+### Templates
+
+You can use `django-friendship` tags in your templates. First enter:
+
+```django
+{% load friendshiptags %}
+```
+
+Then use any of the following:
+
+```django
+{% friends request.user %}
+{% followers request.user %}
+{% following request.user %}
+{% friend_requests request.user %}
+{% blockers request.user %}
+{% blocking request.user %}
+```
+
+### Signals
+
+`django-friendship` emits the following signals (from `friendship.signals`):
+
+- friendship_request_created
+- friendship_request_rejected
+- friendship_request_canceled
+- friendship_request_viewed
+- friendship_request_accepted
+- friendship_removed
+- follower_created
+- follower_removed
+- followee_created
+- followee_removed
+- following_created
+- following_removed
+- block_created
+- block_removed
+
+Each signal's `sender` is the emitting model, so you can connect a receiver
+scoped to it:
+
+```python
+from django.dispatch import receiver
+
+from friendship.models import Follow
+from friendship.signals import follower_created
+
+
+@receiver(follower_created, sender=Follow)
+def on_follow(sender, follower, **kwargs):
+    ...
+```
+
+### Settings
+
+`django-friendship` supports the following settings:
+
+```python
+FRIENDSHIP_CONTEXT_OBJECT_NAME = "user"
+FRIENDSHIP_CONTEXT_OBJECT_LIST_NAME = "users"
+FRIENDSHIP_MANAGER_FRIENDSHIP_REQUEST_SELECT_RELATED_STRATEGY = (
+    "select_related"  # ('select_related', 'prefetch_related', 'none')
+)
+
+# Optional cap on the number of friends each user may have. Unset (the
+# default) means unlimited, so existing projects are unaffected. When set,
+# accepting a request that would put either user over the limit raises
+# friendship.exceptions.MaxFriendsExceededError.
+FRIENDSHIP_MAX_FRIENDS = 800
+```
+
+#### Limiting the number of friends
+
+By default a user may have unlimited friends. Set `FRIENDSHIP_MAX_FRIENDS` to
+cap it. The limit is checked when a request is accepted — if either user is
+already at the limit, `accept()` raises `MaxFriendsExceededError` and no
+friendship is created (the request is left intact so it can be accepted later,
+e.g. after removing another friend):
+
+```python
+from friendship.exceptions import MaxFriendsExceededError
+
+try:
+    friend_request.accept()
+except MaxFriendsExceededError:
+    ...  # tell the user their friend list is full
+
+# You can check a user's current friend count directly:
+Friend.objects.friend_count(user=request.user)
+```
+
+### Custom user models
+
+`django-friendship` works with a custom `AUTH_USER_MODEL`. The bundled views and
+templates resolve users by your user model's `USERNAME_FIELD` (via
+`get_username()`), so a model that authenticates by, say, email works out of the
+box — the value captured in the friendship URLs is looked up against
+`USERNAME_FIELD`. For the default user model this is `username`, so nothing
+changes.
+
+### Contributing
+
+Development [takes place on GitHub](https://github.com/revsys/django-friendship). Bug reports, patches, and fixes are always welcome!
+
+# Need help?
+
+[REVSYS](http://www.revsys.com?utm_medium=github&utm_source=django-test-plus) can help with your Python, Django, and infrastructure projects. If you have a question about this project, please open a GitHub issue. If you love us and want to keep track of our goings-on, here's where you can find us online:
+
+<a href="https://revsys.com?utm_medium=github&utm_source=django-friendship"><img src="https://pbs.twimg.com/profile_images/915928618840285185/sUdRGIn1_400x400.jpg" height="50" /></a>
+<a href="https://twitter.com/revsys"><img src="https://cdn1.iconfinder.com/data/icons/new_twitter_icon/256/bird_twitter_new_simple.png" height="43" /></a>
+<a href="https://www.facebook.com/revsysllc/"><img src="https://cdn3.iconfinder.com/data/icons/picons-social/57/06-facebook-512.png" height="50" /></a>

@@ -1,0 +1,34 @@
+# Zensical configuration: https://zensical.org/docs/
+#
+# Migration away from Sphinx, matching django-test-plus.
+
+[project]
+site_name = "django-friendship"
+site_url = "https://django-friendship.readthedocs.io/en/latest/"
+site_description = "Create and manage follows, blocks, and bi-directional friendships between users."
+repo_url = "https://github.com/revsys/django-friendship"
+edit_uri = "edit/main/docs/"
+
+# Without this, Zensical orders pages alphabetically. Keep the same order as
+# ORDER in scripts/gen_llms.py.
+nav = [
+  { "Overview" = "index.md" },
+  { "Usage" = "usage.md" },
+  { "Cookbook" = "cookbook.md" },
+  { "Signals" = "signals.md" },
+  { "API reference" = "reference.md" },
+]
+
+# mkdocstrings analyses the source statically with griffe, so unlike Sphinx
+# autodoc it does not import friendship and needs no django.setup().
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["."]
+inventories = [
+  "https://docs.python.org/3/objects.inv",
+  "https://docs.djangoproject.com/en/stable/_objects/",
+]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+show_source = false
+show_root_heading = true
+members_order = "source"
